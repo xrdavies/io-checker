@@ -19,28 +19,28 @@ async function checkDeviceStatus(deviceId, workName) {
     const data = response.data;
 
     if (data.status === 'succeeded' && data.data.status !== 'up') {
-      await sendTelegramNotification(workName, deviceId, data.data.status);
+      await sendTelegramNotification(`Alert: Device "${workName}" (ID: ${deviceId}) is not up. Current status: ${data.data.status}`);
     } else {
       console.log(`Device ${deviceId} (${workName}) status: ${data.data.status}`);
     }
   } catch (error) {
-    console.error(`Error checking device ${deviceId}: ${error.message}`);
+    const errorMessage = `Error checking device ${deviceId} (${workName}): ${error.message}`;
+    console.error(errorMessage);
     if (error.response) {
       console.error(`Status: ${error.response.status}`);
       console.error(`Data: ${JSON.stringify(error.response.data)}`);
     }
+    await sendTelegramNotification(errorMessage);
   }
 }
 
-async function sendTelegramNotification(workName, deviceId, status) {
-  const message = `Alert: Device "${workName}" (ID: ${deviceId}) is not up. Current status: ${status}`;
-  
+async function sendTelegramNotification(message) {
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: TELEGRAM_CHAT_ID,
       text: message,
     });
-    console.log(`Notification sent for device ${deviceId}`);
+    console.log(`Notification sent: ${message}`);
   } catch (error) {
     console.error(`Error sending Telegram notification: ${error.message}`);
   }
@@ -49,19 +49,39 @@ async function sendTelegramNotification(workName, deviceId, status) {
 async function processCSV() {
   const devices = [];
 
-  await new Promise((resolve, reject) => {
-    fs.createReadStream('devices.csv')
-      .pipe(csv())
-      .on('data', (row) => {
-        devices.push(row);
-      })
-      .on('end', resolve)
-      .on('error', reject);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      fs.createReadStream('devices.csv')
+        .pipe(csv())
+        .on('data', (row) => {
+          devices.push(row);
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
 
-  for (const device of devices) {
-    await checkDeviceStatus(device['device id'], device['work name']);
+    for (const device of devices) {
+      await checkDeviceStatus(device['device id'], device['work name']);
+    }
+  } catch (error) {
+    const errorMessage = `Error processing CSV: ${error.message}`;
+    console.error(errorMessage);
+    await sendTelegramNotification(errorMessage);
   }
 }
 
-processCSV().catch(console.error);
+async function main() {
+  try {
+    await processCSV();
+  } catch (error) {
+    const errorMessage = `Unhandled error in main execution: ${error.message}`;
+    console.error(errorMessage);
+    await sendTelegramNotification(errorMessage);
+  }
+}
+
+main().catch(async (error) => {
+  const errorMessage = `Critical error: ${error.message}`;
+  console.error(errorMessage);
+  await sendTelegramNotification(errorMessage);
+});
